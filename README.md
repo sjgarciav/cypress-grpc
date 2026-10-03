@@ -1,73 +1,121 @@
-# Estructura del proyecto
-cypress/
-├── e2e/
-│   └── user-service/
-│       └── get-user.cy.ts
-├── fixtures/
-│   └── user-service/
-│       └── get-user.data.ts
-└── support/
-    ├── e2e.ts
-    └── grpc/
-        ├── assertions/
-        │   └── user-response.assertions.ts
-        ├── clients/
-        │   └── user-service.client.ts
-        ├── constants/
-        │   ├── grpc-endpoints.constants.ts
-        │   ├── grpc-metadata.constants.ts
-        │   └── grpc-status.constants.ts
-        ├── tasks/
-        │   └── grpc.tasks.ts
-        └── types/
-            └── grpc-task.types.ts
+# Pruebas gRPC con Cypress
 
-cypress.config.ts
-src/
-└── generated/
-    └── user_pb.ts[2:50 PM]
-  
-cypress/e2e/user-service/get-user.cy.ts: contiene la prueba del happy path de GetUser; invoca la tarea gRPC y comprueba el resultado.
-cypress/fixtures/user-service/get-user.data.ts: guarda los datos del caso de prueba: request, Bearer token, metadata indicador y respuesta esperada.
-cypress/support/e2e.ts: archivo de soporte general de Cypress, cargado antes de los specs.
-assertions/user-response.assertions.ts: agrupa las comprobaciones del status gRPC y de los campos de la respuesta.
-clients/user-service.client.ts: configura y crea el cliente gRPC para UserService.
-constants/grpc-endpoints.constants.ts: define la dirección del servicio gRPC local.
-constants/grpc-metadata.constants.ts: centraliza los nombres de las metadata usadas en la llamada.
-constants/grpc-status.constants.ts: define y organiza los códigos y nombres de estado gRPC.
-tasks/grpc.tasks.ts: implementa la tarea que realiza la llamada gRPC desde Node y entrega su resultado a Cypress.
-types/grpc-task.types.ts: define los tipos TypeScript para el request, metadata, respuesta y resultado de la tarea.
-cypress.config.ts: configura Cypress, indica dónde encontrar los specs y registra las tareas de Node.
-src/generated/user_pb.ts: código generado a partir del proto; contiene las definiciones TypeScript del servicio y sus mensajes.
-[2:52 PM]
+Proyecto de ejemplo para probar servicios gRPC desde Cypress. Cypress ejecuta
+los specs, mientras que las llamadas gRPC se realizan en el proceso Node mediante
+`cy.task()` y `@connectrpc/connect-node`; así se evita intentar usar HTTP/2 desde
+el navegador.
 
-#Usa estas librerias
+El repositorio incluye un servidor gRPC local de prueba basado en `@grpc/grpc-js`.
+Implementa `users.UserService/GetUser` y no depende de WireMock Cloud ni de otro
+servicio externo.
 
-@bufbuild/protobuf (^2.15.0) — runtime de mensajes protobuf generados
-@connectrpc/connect (^2.2.0) — cliente Connect/gRPC
-@connectrpc/connect-node (^2.2.0) — transporte gRPC sobre Node (HTTP/2)
+## Requisitos
 
-# Para subir el grpc server
+- Node.js y npm.
+- `grpcurl` (opcional, solo para invocar el servicio manualmente).
+
+## Instalación
+
+Instala las dependencias del proyecto y del servidor mock desde la raíz:
+
+```bash
+npm ci
+npm --prefix grpcServer ci
+```
+
+## Ejecutar la prueba
+
+Inicia el servidor mock en una terminal:
+
+```bash
 npm --prefix grpcServer start
+```
 
-# Para ejecutar la prueba (es solo de happy path de un servicio gRPC con autenticacion, metadata)
+Por defecto escucha en `0.0.0.0:50051`. En otra terminal, ejecuta el spec:
+
+```bash
 npm run cy:run -- --spec cypress/e2e/user-service/get-user.cy.ts
+```
 
-# Con este comando puedes probar el gRPC "users.UserService/GetUser" (tiene un Bearer Token, un metadata que se llama indicador):
+Para abrir Cypress en modo interactivo:
 
-grpcurl \
-  -plaintext \
-  -import-path ./proto-files \
-  -proto user.proto \
-  -H "authorization: Bearer token123" \
-  -H "indicador: yes" \
-  -d '{"id":"123"}' \
-  0.0.0.0:50051 \
-  users.UserService/GetUser
+```bash
+npm run cy:open
+```
 
-# La respuesta esperada es:
+Si cambias el puerto del servidor usando `PORT`, actualiza también
+`USER_SERVICE_BASE_URL` en
+`cypress/support/grpc/constants/grpc-endpoints.constants.ts`.
+
+## Servicio y prueba incluidos
+
+El proto `proto-files/user.proto` define `users.UserService/GetUser`. El servidor
+mock responde correctamente cuando recibe el ID `123`, una metadata
+`authorization` con un Bearer token válido y la metadata `indicador` con el valor
+`yes`. La prueba incluida cubre únicamente este caso exitoso (*happy path*).
+
+La respuesta esperada es:
+
+```json
 {
   "id": "123",
   "name": "Alice Mocked via WireMock Cloud",
   "email": "alice-cloud@example.com"
 }
+```
+
+El nombre del usuario es solo parte de los datos de la respuesta mock; no implica
+que se realice una conexión a WireMock Cloud.
+
+## Invocar el servicio con grpcurl
+
+Con el servidor en ejecución, puedes hacer una llamada manual. Sustituye
+`<BEARER_TOKEN>` por un token aceptado por el servidor:
+
+```bash
+grpcurl \
+  -plaintext \
+  -import-path ./proto-files \
+  -proto user.proto \
+  -H 'authorization: Bearer <BEARER_TOKEN>' \
+  -H 'indicador: yes' \
+  -d '{"id":"123"}' \
+  127.0.0.1:50051 \
+  users.UserService/GetUser
+```
+
+## Generar código desde el proto
+
+El código TypeScript generado se encuentra en `src/generated/user_pb.ts`.
+Después de modificar el proto, puedes regenerarlo con Buf:
+
+```bash
+npm run proto:generate
+```
+
+## Estructura principal
+
+```text
+cypress/
+├── e2e/user-service/              # Specs de Cypress
+├── fixtures/user-service/         # Request y respuesta esperada
+└── support/grpc/
+    ├── assertions/                # Aserciones de status y respuesta
+    ├── clients/                   # Cliente Connect/gRPC
+    ├── constants/                 # Endpoint, metadata y status gRPC
+    ├── tasks/                     # Llamadas gRPC ejecutadas en Node
+    └── types/                     # Tipos de payload y resultado
+grpcServer/                        # Servidor gRPC mock local
+proto-files/                       # Definiciones .proto
+src/generated/                     # Código TypeScript generado por Buf
+cypress.config.ts                  # Configuración de Cypress y registro de tasks
+buf.gen.yaml                       # Configuración de generación de código
+```
+
+## Tecnologías principales
+
+- Cypress para ejecutar las pruebas.
+- Buf y `@bufbuild/protoc-gen-es` para generar código TypeScript desde protobuf.
+- `@bufbuild/protobuf`, `@connectrpc/connect` y `@connectrpc/connect-node` para
+  trabajar con mensajes protobuf e invocar el servicio desde Node.
+- `@grpc/grpc-js` y `@grpc/proto-loader` para levantar el servidor mock.
